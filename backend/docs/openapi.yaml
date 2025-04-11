@@ -1,0 +1,1875 @@
+openapi: 3.0.3
+info:
+  title: Timesheet Application API
+  version: 1.0.0
+  description: |-
+    API pro aplikaci na sledování času (Timesheet). Umožňuje správu uživatelů, klientů, projektů, úkolů a časových záznamů.
+    Specifikace definuje všechny dostupné endpointy, datové struktury a metody autentizace.
+  contact:
+    name: API Support
+    email: support@example.com # Nahradit skutečným kontaktem
+servers:
+  - url: /api/v1 # Relativní cesta, předpokládá base URL serveru
+    description: Hlavní API endpoint (verze 1)
+  - url: http://localhost:8000/api/v1
+    description: Lokální vývojový server
+  - url: https://api.example.com/v1
+    description: Produkční server
+
+tags:
+  - name: Authentication
+    description: Operace týkající se přihlášení, registrace, ověření a správy uživatelských sezení.
+  - name: Users
+    description: Správa uživatelských účtů (vyžaduje administrátorská oprávnění).
+  - name: Profile
+    description: Správa profilu aktuálně přihlášeného uživatele.
+  - name: Clients
+    description: Správa klientů.
+  - name: Projects
+    description: Správa projektů a členství v nich.
+  - name: Tasks
+    description: Správa úkolů v rámci projektů.
+  - name: Tags
+    description: Správa štítků pro úkoly.
+  - name: TimeEntries
+    description: Správa časových záznamů.
+
+paths:
+  # --- Authentication ---
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: Registrace nového uživatele
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRegisterRequest'
+      responses:
+        '201':
+          description: Uživatel úspěšně zaregistrován (může vyžadovat ověření emailu).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict' # Email or username exists
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity' # Validation errors
+
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Přihlášení uživatele
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserLoginRequest'
+      responses:
+        '200':
+          description: Úspěšné přihlášení, vrací tokeny.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokensResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest' # Missing credentials
+        '401':
+          $ref: '#/components/responses/Unauthorized' # Invalid credentials
+
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Odhlášení uživatele
+      operationId: logoutUser
+      security:
+        - bearerAuth: []
+      # Může přijímat refresh token pro invalidaci na serveru
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '204':
+          description: Úspěšné odhlášení.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/refresh-token:
+    post:
+      tags: [Authentication]
+      summary: Obnovení access tokenu pomocí refresh tokenu
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200':
+          description: Nové tokeny úspěšně vydány.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokensResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest' # Missing refresh token
+        '401':
+          $ref: '#/components/responses/Unauthorized' # Invalid or expired refresh token
+
+  /auth/verify-email/{token}:
+    get:
+      tags: [Authentication]
+      summary: Ověření emailové adresy pomocí tokenu
+      operationId: verifyEmail
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+          description: Ověřovací token zaslaný emailem.
+      responses:
+        '200':
+          description: Email úspěšně ověřen.
+        '400':
+          $ref: '#/components/responses/BadRequest' # Invalid token format
+        '404':
+          $ref: '#/components/responses/NotFound' # Token not found or expired
+
+  /auth/request-password-reset:
+    post:
+      tags: [Authentication]
+      summary: Žádost o reset hesla (zaslání emailu)
+      operationId: requestPasswordReset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '204':
+          description: Pokud uživatel existuje, email byl (nebo bude) odeslán. (Odpověď je stejná i pro neexistující email z bezpečnostních důvodů).
+        '400':
+          $ref: '#/components/responses/BadRequest' # Invalid email format
+
+  /auth/reset-password:
+    post:
+      tags: [Authentication]
+      summary: Nastavení nového hesla pomocí reset tokenu
+      operationId: resetPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, new_password]
+              properties:
+                token: { type: string }
+                new_password: { type: string, format: password }
+      responses:
+        '204':
+          description: Heslo úspěšně změněno.
+        '400':
+          $ref: '#/components/responses/BadRequest' # Invalid token or password format
+        '404':
+          $ref: '#/components/responses/NotFound' # Token not found or expired
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity' # Password validation failed
+
+  # --- Profile ---
+  /profile:
+    get:
+      tags: [Profile]
+      summary: Získání profilu přihlášeného uživatele
+      operationId: getMyProfile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Profil přihlášeného uživatele.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      tags: [Profile]
+      summary: Aktualizace profilu přihlášeného uživatele
+      operationId: updateMyProfile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdateRequest'
+      responses:
+        '200':
+          description: Profil úspěšně aktualizován.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /profile/change-password:
+    post:
+      tags: [Profile]
+      summary: Změna hesla přihlášeného uživatele
+      operationId: changeMyPassword
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string, format: password }
+                new_password: { type: string, format: password }
+      responses:
+        '204':
+          description: Heslo úspěšně změněno.
+        '400':
+          $ref: '#/components/responses/BadRequest' # Invalid password format
+        '401':
+          $ref: '#/components/responses/Unauthorized' # Wrong current password
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity' # New password validation failed
+
+  # --- Users (Admin operations) ---
+  /users:
+    get:
+      tags: [Users]
+      summary: Seznam všech uživatelů (Admin)
+      operationId: listUsers
+      security:
+        - bearerAuth: [] # Vyžaduje admin oprávnění
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+        - $ref: '#/components/parameters/SortByParam'
+        - $ref: '#/components/parameters/SortOrderParam'
+        - name: role
+          in: query
+          schema: { $ref: '#/components/schemas/UserRole' }
+          description: Filtrování podle role uživatele.
+        - name: is_active
+          in: query
+          schema: { type: boolean }
+          description: Filtrování podle aktivního stavu.
+      responses:
+        '200':
+          description: Seznam uživatelů.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden' # Not an admin
+
+    post:
+      tags: [Users]
+      summary: Vytvoření nového uživatele (Admin)
+      operationId: createUser
+      security:
+        - bearerAuth: [] # Vyžaduje admin oprávnění
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreateRequest' # Může se lišit od Register (např. rovnou nastavení role)
+      responses:
+        '201':
+          description: Uživatel úspěšně vytvořen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /users/{userId}:
+    get:
+      tags: [Users]
+      summary: Získání detailu uživatele (Admin)
+      operationId: getUserById
+      security:
+        - bearerAuth: [] # Vyžaduje admin oprávnění
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+      responses:
+        '200':
+          description: Detail uživatele.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Users]
+      summary: Aktualizace uživatele (Admin)
+      operationId: updateUser
+      security:
+        - bearerAuth: [] # Vyžaduje admin oprávnění
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdateRequest' # Admin může měnit více polí
+      responses:
+        '200':
+          description: Uživatel úspěšně aktualizován.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [Users]
+      summary: Smazání uživatele (Admin)
+      operationId: deleteUser
+      security:
+        - bearerAuth: [] # Vyžaduje admin oprávnění
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+      responses:
+        '204':
+          description: Uživatel úspěšně smazán.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # --- Clients ---
+  /clients:
+    get:
+      tags: [Clients]
+      summary: Seznam všech klientů
+      operationId: listClients
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+        - $ref: '#/components/parameters/SortByParam'
+        - $ref: '#/components/parameters/SortOrderParam'
+        - name: name
+          in: query
+          schema: { type: string }
+          description: Filtrování podle části názvu klienta (case-insensitive).
+      responses:
+        '200':
+          description: Seznam klientů.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ClientResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Clients]
+      summary: Vytvoření nového klienta
+      operationId: createClient
+      security:
+        - bearerAuth: [] # Vyžaduje oprávnění (manager/admin?)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientCreateRequest'
+      responses:
+        '201':
+          description: Klient úspěšně vytvořen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict' # Client name/vat_id exists
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /clients/{clientId}:
+    get:
+      tags: [Clients]
+      summary: Získání detailu klienta
+      operationId: getClientById
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ClientIdParam'
+      responses:
+        '200':
+          description: Detail klienta.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Clients]
+      summary: Aktualizace klienta
+      operationId: updateClient
+      security:
+        - bearerAuth: [] # Vyžaduje oprávnění (manager/admin?)
+      parameters:
+        - $ref: '#/components/parameters/ClientIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientUpdateRequest'
+      responses:
+        '200':
+          description: Klient úspěšně aktualizován.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [Clients]
+      summary: Smazání klienta
+      operationId: deleteClient
+      security:
+        - bearerAuth: [] # Vyžaduje oprávnění (admin?)
+      parameters:
+        - $ref: '#/components/parameters/ClientIdParam'
+      responses:
+        '204':
+          description: Klient úspěšně smazán.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409': # Conflict - např. pokud má klient stále aktivní projekty
+          description: Nelze smazat klienta, protože má stále přiřazené projekty.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # --- Projects ---
+  /projects:
+    get:
+      tags: [Projects]
+      summary: Seznam projektů
+      operationId: listProjects
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+        - $ref: '#/components/parameters/SortByParam'
+        - $ref: '#/components/parameters/SortOrderParam'
+        - $ref: '#/components/parameters/ClientIdFilterParam'
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ProjectStatus' }
+          description: Filtrování podle stavu projektu.
+        - name: project_manager_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: Filtrování podle ID manažera projektu.
+        - name: is_member # Speciální filtr
+          in: query
+          schema: { type: boolean }
+          description: Pokud true, vrátí pouze projekty, kterých je přihlášený uživatel členem.
+      responses:
+        '200':
+          description: Seznam projektů.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Projects]
+      summary: Vytvoření nového projektu
+      operationId: createProject
+      security:
+        - bearerAuth: [] # Vyžaduje oprávnění (manager/admin?)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreateRequest'
+      responses:
+        '201':
+          description: Projekt úspěšně vytvořen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict' # Project code exists
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /projects/{projectId}:
+    get:
+      tags: [Projects]
+      summary: Získání detailu projektu
+      operationId: getProjectById
+      security:
+        - bearerAuth: [] # Měl by mít přístup člen projektu, manažer nebo admin
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdParam'
+      responses:
+        '200':
+          description: Detail projektu.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse' # Může obsahovat seznam členů
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden' # Není členem/manažerem/adminem
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Projects]
+      summary: Aktualizace projektu
+      operationId: updateProject
+      security:
+        - bearerAuth: [] # Vyžaduje oprávnění (project manager/admin?)
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectUpdateRequest'
+      responses:
+        '200':
+          description: Projekt úspěšně aktualizován.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [Projects]
+      summary: Smazání projektu
+      operationId: deleteProject
+      security:
+        - bearerAuth: [] # Vyžaduje oprávnění (admin?)
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdParam'
+      responses:
+        '204':
+          description: Projekt úspěšně smazán (včetně úkolů a čas. záznamů díky CASCADE).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # --- Project Memberships ---
+  /projects/{projectId}/members:
+    get:
+      tags: [Projects]
+      summary: Seznam členů projektu
+      operationId: listProjectMembers
+      security:
+        - bearerAuth: [] # Člen projektu, manažer, admin
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdParam'
+      responses:
+        '200':
+          description: Seznam členů a jejich rolí v projektu.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectMembershipResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound' # Project not found
+    post:
+      tags: [Projects]
+      summary: Přidání člena do projektu
+      operationId: addProjectMember
+      security:
+        - bearerAuth: [] # Project manager/admin
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectMembershipRequest'
+      responses:
+        '201':
+          description: Člen úspěšně přidán.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMembershipResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound' # Project or User not found
+        '409':
+          $ref: '#/components/responses/Conflict' # User is already a member
+
+  /projects/{projectId}/members/{userId}:
+    delete:
+      tags: [Projects]
+      summary: Odebrání člena z projektu
+      operationId: removeProjectMember
+      security:
+        - bearerAuth: [] # Project manager/admin
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdParam'
+        - $ref: '#/components/parameters/UserIdParam'
+      responses:
+        '204':
+          description: Člen úspěšně odebrán.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound' # Project, User or Membership not found
+    patch:
+      tags: [Projects]
+      summary: Aktualizace role člena v projektu
+      operationId: updateProjectMemberRole
+      security:
+        - bearerAuth: [] # Project manager/admin
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdParam'
+        - $ref: '#/components/parameters/UserIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: '#/components/schemas/ProjectRole' }
+      responses:
+        '200':
+          description: Role člena aktualizována.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMembershipResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound' # Project, User or Membership not found
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity' # Invalid role
+
+  # --- Tasks ---
+  /tasks: # Globální seznam, spíše pro adminy nebo specifické reporty
+    get:
+      tags: [Tasks]
+      summary: Seznam všech úkolů (s filtry)
+      operationId: listAllTasks
+      security:
+        - bearerAuth: [] # Pravděpodobně admin/manager
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+        - $ref: '#/components/parameters/SortByParam'
+        - $ref: '#/components/parameters/SortOrderParam'
+        - $ref: '#/components/parameters/ProjectIdFilterParam'
+        - $ref: '#/components/parameters/AssigneeIdFilterParam'
+        - $ref: '#/components/parameters/CreatorIdFilterParam'
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/TaskStatus' }
+          description: Filtrování podle stavu úkolu.
+        - name: priority
+          in: query
+          schema: { $ref: '#/components/schemas/TaskPriority' }
+          description: Filtrování podle priority úkolu.
+        - name: due_date_from
+          in: query
+          schema: { type: string, format: date }
+          description: Filtrování podle data splnění (od).
+        - name: due_date_to
+          in: query
+          schema: { type: string, format: date }
+          description: Filtrování podle data splnění (do).
+        - name: tag_id # Filtr podle štítku
+          in: query
+          schema: { type: string, format: uuid }
+          description: Filtrování úkolů, které mají přiřazený daný štítek.
+      responses:
+        '200':
+          description: Seznam úkolů odpovídajících filtrům.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TaskResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /projects/{projectId}/tasks:
+    get:
+      tags: [Tasks]
+      summary: Seznam úkolů pro specifický projekt
+      operationId: listProjectTasks
+      security:
+        - bearerAuth: [] # Člen projektu, manažer, admin
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+        - $ref: '#/components/parameters/SortByParam'
+        - $ref: '#/components/parameters/SortOrderParam'
+        - $ref: '#/components/parameters/AssigneeIdFilterParam'
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/TaskStatus' }
+          description: Filtrování podle stavu úkolu.
+        # ... další relevantní filtry ...
+      responses:
+        '200':
+          description: Seznam úkolů v projektu.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TaskResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound' # Project not found
+
+    post:
+      tags: [Tasks]
+      summary: Vytvoření nového úkolu v projektu
+      operationId: createTask
+      security:
+        - bearerAuth: [] # Člen projektu (?), manažer, admin
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCreateRequest'
+      responses:
+        '201':
+          description: Úkol úspěšně vytvořen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound' # Project not found
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /tasks/{taskId}:
+    get:
+      tags: [Tasks]
+      summary: Získání detailu úkolu
+      operationId: getTaskById
+      security:
+        - bearerAuth: [] # Člen projektu, manažer, admin
+      parameters:
+        - $ref: '#/components/parameters/TaskIdParam'
+      responses:
+        '200':
+          description: Detail úkolu.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse' # Může obsahovat seznam tagů
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Tasks]
+      summary: Aktualizace úkolu
+      operationId: updateTask
+      security:
+        - bearerAuth: [] # Přiřazený uživatel, tvůrce(?), manažer, admin
+      parameters:
+        - $ref: '#/components/parameters/TaskIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskUpdateRequest'
+      responses:
+        '200':
+          description: Úkol úspěšně aktualizován.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [Tasks]
+      summary: Smazání úkolu
+      operationId: deleteTask
+      security:
+        - bearerAuth: [] # Tvůrce(?), manažer, admin
+      parameters:
+        - $ref: '#/components/parameters/TaskIdParam'
+      responses:
+        '204':
+          description: Úkol úspěšně smazán (včetně čas. záznamů a přiřazení tagů).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # --- Task Tags ---
+  /tasks/{taskId}/tags:
+    get:
+      tags: [Tasks]
+      summary: Seznam štítků přiřazených k úkolu
+      operationId: listTaskTags
+      security:
+        - bearerAuth: [] # Člen projektu, manažer, admin
+      parameters:
+        - $ref: '#/components/parameters/TaskIdParam'
+      responses:
+        '200':
+          description: Seznam štítků úkolu.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TagResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound' # Task not found
+
+  /tasks/{taskId}/tags/{tagId}:
+    post:
+      tags: [Tasks]
+      summary: Přiřazení štítku k úkolu
+      operationId: assignTagToTask
+      security:
+        - bearerAuth: [] # Člen projektu, manažer, admin
+      parameters:
+        - $ref: '#/components/parameters/TaskIdParam'
+        - $ref: '#/components/parameters/TagIdParam'
+      responses:
+        '204':
+          description: Štítek úspěšně přiřazen.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound' # Task or Tag not found
+        '409':
+          $ref: '#/components/responses/Conflict' # Tag already assigned
+    delete:
+      tags: [Tasks]
+      summary: Odebrání štítku z úkolu
+      operationId: unassignTagFromTask
+      security:
+        - bearerAuth: [] # Člen projektu, manažer, admin
+      parameters:
+        - $ref: '#/components/parameters/TaskIdParam'
+        - $ref: '#/components/parameters/TagIdParam'
+      responses:
+        '204':
+          description: Štítek úspěšně odebrán.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound' # Task, Tag or assignment not found
+
+  # --- Tags ---
+  /tags:
+    get:
+      tags: [Tags]
+      summary: Seznam všech štítků
+      operationId: listTags
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+        - name: name
+          in: query
+          schema: { type: string }
+          description: Filtrování podle části názvu štítku.
+      responses:
+        '200':
+          description: Seznam štítků.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TagResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Tags]
+      summary: Vytvoření nového štítku
+      operationId: createTag
+      security:
+        - bearerAuth: [] # Kdo může vytvářet štítky? Asi kdokoliv?
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagCreateRequest'
+      responses:
+        '201':
+          description: Štítek úspěšně vytvořen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict' # Tag name exists
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /tags/{tagId}:
+    get:
+      tags: [Tags]
+      summary: Získání detailu štítku
+      operationId: getTagById
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TagIdParam'
+      responses:
+        '200':
+          description: Detail štítku.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Tags]
+      summary: Aktualizace štítku
+      operationId: updateTag
+      security:
+        - bearerAuth: [] # Admin? Nebo nikdo?
+      parameters:
+        - $ref: '#/components/parameters/TagIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagUpdateRequest'
+      responses:
+        '200':
+          description: Štítek úspěšně aktualizován.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [Tags]
+      summary: Smazání štítku
+      operationId: deleteTag
+      security:
+        - bearerAuth: [] # Admin?
+      parameters:
+        - $ref: '#/components/parameters/TagIdParam'
+      responses:
+        '204':
+          description: Štítek úspěšně smazán (včetně všech přiřazení k úkolům).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # --- Time Entries ---
+  /time-entries:
+    get:
+      tags: [TimeEntries]
+      summary: Seznam časových záznamů (s filtry)
+      operationId: listTimeEntries
+      security:
+        - bearerAuth: [] # Uživatel vidí své, manažer/admin vidí více
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+        - $ref: '#/components/parameters/SortByParam'
+        - $ref: '#/components/parameters/SortOrderParam'
+        - $ref: '#/components/parameters/UserIdFilterParam' # Pro admina/manažera
+        - $ref: '#/components/parameters/ProjectIdFilterParam'
+        - $ref: '#/components/parameters/TaskIdFilterParam'
+        - name: date_from
+          in: query
+          schema: { type: string, format: date }
+          description: Filtrování podle data záznamu (od).
+        - name: date_to
+          in: query
+          schema: { type: string, format: date }
+          description: Filtrování podle data záznamu (do).
+        - name: is_billable
+          in: query
+          schema: { type: boolean }
+          description: Filtrování podle fakturovatelnosti.
+        - name: is_approved # Filtr podle stavu schválení
+          in: query
+          schema: { type: boolean }
+          description: Filtrování podle toho, zda je záznam schválen (true) nebo neschválen (false).
+      responses:
+        '200':
+          description: Seznam časových záznamů.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TimeEntryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden' # Pokud se uživatel snaží vidět cizí záznamy bez oprávnění
+    post:
+      tags: [TimeEntries]
+      summary: Vytvoření nového časového záznamu
+      operationId: createTimeEntry
+      security:
+        - bearerAuth: [] # Uživatel vytváří pro sebe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimeEntryCreateRequest'
+      responses:
+        '201':
+          description: Časový záznam úspěšně vytvořen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeEntryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403': # Např. pokud se snaží vytvořit záznam pro cizí projekt/úkol, ke kterému nemá přístup
+          $ref: '#/components/responses/Forbidden'
+        '404': # Task or Project not found
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /time-entries/{timeEntryId}:
+    get:
+      tags: [TimeEntries]
+      summary: Získání detailu časového záznamu
+      operationId: getTimeEntryById
+      security:
+        - bearerAuth: [] # Vlastník záznamu, manažer, admin
+      parameters:
+        - $ref: '#/components/parameters/TimeEntryIdParam'
+      responses:
+        '200':
+          description: Detail časového záznamu.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeEntryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [TimeEntries]
+      summary: Aktualizace časového záznamu
+      operationId: updateTimeEntry
+      security:
+        - bearerAuth: [] # Vlastník záznamu (pokud není schváleno), manažer, admin
+      parameters:
+        - $ref: '#/components/parameters/TimeEntryIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimeEntryUpdateRequest'
+      responses:
+        '200':
+          description: Časový záznam úspěšně aktualizován.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeEntryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403': # Nelze upravit schválený záznam (pokud nejsi admin), nebo cizí záznam
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [TimeEntries]
+      summary: Smazání časového záznamu
+      operationId: deleteTimeEntry
+      security:
+        - bearerAuth: [] # Vlastník záznamu (pokud není schváleno), manažer, admin
+      parameters:
+        - $ref: '#/components/parameters/TimeEntryIdParam'
+      responses:
+        '204':
+          description: Časový záznam úspěšně smazán.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403': # Nelze smazat schválený záznam (pokud nejsi admin), nebo cizí záznam
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /time-entries/{timeEntryId}/approve:
+    post:
+      tags: [TimeEntries]
+      summary: Schválení časového záznamu
+      operationId: approveTimeEntry
+      security:
+        - bearerAuth: [] # Manažer projektu, admin
+      parameters:
+        - $ref: '#/components/parameters/TimeEntryIdParam'
+      responses:
+        '200':
+          description: Časový záznam úspěšně schválen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeEntryResponse' # Vrací aktualizovaný záznam
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409': # Conflict - záznam už je schválený
+          $ref: '#/components/responses/Conflict'
+
+  /time-entries/{timeEntryId}/unapprove:
+    post:
+      tags: [TimeEntries]
+      summary: Zrušení schválení časového záznamu
+      operationId: unapproveTimeEntry
+      security:
+        - bearerAuth: [] # Manažer projektu, admin
+      parameters:
+        - $ref: '#/components/parameters/TimeEntryIdParam'
+      responses:
+        '200':
+          description: Schválení časového záznamu úspěšně zrušeno.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeEntryResponse' # Vrací aktualizovaný záznam
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409': # Conflict - záznam není schválený
+          $ref: '#/components/responses/Conflict'
+
+
+# --- Reusable Components ---
+components:
+  schemas:
+    # --- Enums ---
+    UserRole:
+      type: string
+      enum: [admin, manager, member, viewer]
+      description: Globální role uživatele.
+    ProjectStatus:
+      type: string
+      enum: [active, archived, completed, on_hold, planning]
+      description: Stav projektu.
+    TaskStatus:
+      type: string
+      enum: [todo, in_progress, review, done, blocked]
+      description: Stav úkolu.
+    TaskPriority:
+      type: string
+      enum: [low, medium, high]
+      description: Priorita úkolu.
+      nullable: true
+    ProjectRole:
+      type: string
+      enum: [member, manager, viewer]
+      description: Role uživatele v rámci projektu.
+
+    # --- Base Schemas (Common fields) ---
+    UserBase:
+      type: object
+      properties:
+        username: { type: string, example: "john.doe" }
+        email: { type: string, format: email, example: "john.doe@example.com" }
+        first_name: { type: string, example: "John" }
+        last_name: { type: string, example: "Doe" }
+        avatar_url: { type: string, format: url, nullable: true }
+        timezone: { type: string, example: "Europe/Prague" }
+        locale: { type: string, example: "cs-CZ" }
+        job_title: { type: string, nullable: true, example: "Developer" }
+        default_hourly_rate: { type: number, format: float, nullable: true, example: 50.0 }
+    ClientBase:
+      type: object
+      properties:
+        name: { type: string, example: "ACME Corporation" }
+        contact_person: { type: string, nullable: true, example: "Wile E. Coyote" }
+        email: { type: string, format: email, nullable: true, example: "wile@acme.com" }
+        phone: { type: string, nullable: true, example: "+1-555-ROCKET" }
+        address: { type: string, nullable: true, example: "123 Desert Way, Nowhere, AZ" }
+        vat_id: { type: string, nullable: true, example: "CZ12345678" }
+    ProjectBase:
+      type: object
+      properties:
+        name: { type: string, example: "Website Redesign" }
+        project_code: { type: string, nullable: true, example: "WEB-RD-01" }
+        client_id: { type: string, format: uuid, nullable: true, description: "ID klienta, pokud existuje." }
+        project_manager_id: { type: string, format: uuid, nullable: true, description: "ID uživatele, který je manažerem." }
+        description: { type: string, nullable: true, example: "Complete redesign of the main corporate website." }
+        status: { $ref: '#/components/schemas/ProjectStatus' }
+        start_date: { type: string, format: date, nullable: true }
+        end_date: { type: string, format: date, nullable: true }
+        budget_hours: { type: number, format: float, nullable: true, example: 250.5 }
+        is_billable: { type: boolean, default: true }
+    TaskBase:
+      type: object
+      properties:
+        title: { type: string, example: "Implement login page" }
+        description: { type: string, nullable: true, example: "Create frontend and backend for user login." }
+        assignee_id: { type: string, format: uuid, nullable: true, description: "ID přiřazeného uživatele." }
+        parent_task_id: { type: string, format: uuid, nullable: true, description: "ID nadřazeného úkolu (pro subtasky)." }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        priority: { $ref: '#/components/schemas/TaskPriority' }
+        due_date: { type: string, format: date, nullable: true }
+        estimated_hours: { type: number, format: float, nullable: true, example: 8.0 }
+    TagBase:
+      type: object
+      properties:
+        name: { type: string, example: "Frontend" }
+        color: { type: string, format: "^#[A-Fa-f0-9]{6}$", nullable: true, example: "#3498DB" }
+    TimeEntryBase:
+      type: object
+      properties:
+        task_id: { type: string, format: uuid, description: "ID úkolu, ke kterému se záznam vztahuje." }
+        project_id: { type: string, format: uuid, description: "ID projektu (pro snazší filtrování, mělo by odpovídat projektu úkolu)." }
+        entry_date: { type: string, format: date, description: "Datum, ke kterému se čas vztahuje." }
+        duration_minutes: { type: integer, minimum: 1, description: "Doba trvání v minutách." }
+        notes: { type: string, nullable: true, example: "Worked on API integration." }
+        is_billable: { type: boolean, default: true }
+
+    # --- Request Schemas ---
+    UserRegisterRequest:
+      allOf:
+        - $ref: '#/components/schemas/UserBase'
+        - type: object
+          required: [username, email, password, first_name, last_name]
+          properties:
+            password: { type: string, format: password, writeOnly: true } # writeOnly means it's not returned
+    UserLoginRequest:
+      type: object
+      required: [email, password] # Nebo username
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password, writeOnly: true }
+    UserCreateRequest: # Admin create
+      allOf:
+        - $ref: '#/components/schemas/UserBase'
+        - type: object
+          required: [username, email, password, first_name, last_name, role]
+          properties:
+            password: { type: string, format: password, writeOnly: true }
+            role: { $ref: '#/components/schemas/UserRole' }
+            is_active: { type: boolean, default: true }
+            is_email_verified: { type: boolean, default: false } # Admin might bypass verification initially
+    UserUpdateRequest: # Admin update
+      allOf:
+        - $ref: '#/components/schemas/UserBase'
+        - type: object
+          properties:
+            role: { $ref: '#/components/schemas/UserRole' }
+            is_active: { type: boolean }
+            # Admin nemůže přímo měnit heslo, jen resetovat? Nebo speciální endpoint?
+    ProfileUpdateRequest: # User update self
+      type: object
+      properties:
+        first_name: { type: string }
+        last_name: { type: string }
+        avatar_url: { type: string, format: url, nullable: true }
+        timezone: { type: string }
+        locale: { type: string }
+        job_title: { type: string, nullable: true }
+        default_hourly_rate: { type: number, format: float, nullable: true }
+    ClientCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/ClientBase'
+        - type: object
+          required: [name]
+    ClientUpdateRequest:
+      allOf: # All optional for PATCH
+        - $ref: '#/components/schemas/ClientBase'
+    ProjectCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/ProjectBase'
+        - type: object
+          required: [name] # Minimálně název
+    ProjectUpdateRequest:
+      allOf: # All optional for PATCH
+        - $ref: '#/components/schemas/ProjectBase'
+    ProjectMembershipRequest:
+      type: object
+      required: [user_id, role]
+      properties:
+        user_id: { type: string, format: uuid, description: "ID uživatele k přidání" }
+        role: { $ref: '#/components/schemas/ProjectRole' }
+    TaskCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/TaskBase'
+        - type: object
+          required: [title] # project_id se bere z URL
+    TaskUpdateRequest:
+      allOf: # All optional for PATCH
+        - $ref: '#/components/schemas/TaskBase'
+    TagCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/TagBase'
+        - type: object
+          required: [name]
+    TagUpdateRequest:
+      allOf: # All optional for PATCH
+        - $ref: '#/components/schemas/TagBase'
+    TimeEntryCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/TimeEntryBase'
+        - type: object
+          required: [task_id, project_id, entry_date, duration_minutes]
+          properties:
+            user_id: { type: string, format: uuid, description: "ID uživatele (pro admina/manažera, jinak se bere přihlášený)" } # Optional?
+    TimeEntryUpdateRequest:
+      allOf: # All optional for PATCH
+        - $ref: '#/components/schemas/TimeEntryBase'
+
+    # --- Response Schemas ---
+    AuthTokensResponse:
+      type: object
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, example: "Bearer" }
+        expires_in: { type: integer, description: "Platnost access tokenu v sekundách." }
+    UserResponse:
+      allOf:
+        - $ref: '#/components/schemas/UserBase'
+        - type: object
+          properties:
+            user_id: { type: string, format: uuid, readOnly: true }
+            role: { $ref: '#/components/schemas/UserRole' }
+            is_active: { type: boolean, readOnly: true }
+            is_email_verified: { type: boolean, readOnly: true }
+            is_2fa_enabled: { type: boolean, readOnly: true }
+            manager_id: { type: string, format: uuid, nullable: true, readOnly: true }
+            last_login_at: { type: string, format: date-time, nullable: true, readOnly: true }
+            created_at: { type: string, format: date-time, readOnly: true }
+            updated_at: { type: string, format: date-time, readOnly: true }
+    ClientResponse:
+      allOf:
+        - $ref: '#/components/schemas/ClientBase'
+        - type: object
+          properties:
+            client_id: { type: string, format: uuid, readOnly: true }
+            created_at: { type: string, format: date-time, readOnly: true }
+            updated_at: { type: string, format: date-time, readOnly: true }
+    ProjectResponse:
+      allOf:
+        - $ref: '#/components/schemas/ProjectBase'
+        - type: object
+          properties:
+            project_id: { type: string, format: uuid, readOnly: true }
+            created_at: { type: string, format: date-time, readOnly: true }
+            updated_at: { type: string, format: date-time, readOnly: true }
+            # Vnořené objekty pro snazší zobrazení na FE
+            client: { $ref: '#/components/schemas/ClientResponse', nullable: true, readOnly: true }
+            project_manager: { $ref: '#/components/schemas/UserResponse', nullable: true, readOnly: true }
+            # members: # Může být zahrnuto zde nebo přes /members endpoint
+            #   type: array
+            #   readOnly: true
+            #   items:
+            #     $ref: '#/components/schemas/ProjectMembershipResponse'
+    ProjectMembershipResponse:
+      type: object
+      properties:
+        project_membership_id: { type: string, format: uuid, readOnly: true }
+        project_id: { type: string, format: uuid, readOnly: true }
+        user_id: { type: string, format: uuid, readOnly: true }
+        role: { $ref: '#/components/schemas/ProjectRole' }
+        joined_at: { type: string, format: date-time, readOnly: true }
+        user: { $ref: '#/components/schemas/UserResponse', readOnly: true } # Vnořený objekt uživatele
+    TaskResponse:
+      allOf:
+        - $ref: '#/components/schemas/TaskBase'
+        - type: object
+          properties:
+            task_id: { type: string, format: uuid, readOnly: true }
+            project_id: { type: string, format: uuid, readOnly: true }
+            creator_id: { type: string, format: uuid, readOnly: true }
+            completed_at: { type: string, format: date-time, nullable: true, readOnly: true }
+            created_at: { type: string, format: date-time, readOnly: true }
+            updated_at: { type: string, format: date-time, readOnly: true }
+            # Vnořené objekty
+            project: { $ref: '#/components/schemas/ProjectResponse', readOnly: true } # Základní info o projektu
+            creator: { $ref: '#/components/schemas/UserResponse', readOnly: true } # Základní info o tvůrci
+            assignee: { $ref: '#/components/schemas/UserResponse', nullable: true, readOnly: true } # Základní info o řešiteli
+            tags: # Seznam tagů může být součástí odpovědi
+              type: array
+              readOnly: true
+              items:
+                $ref: '#/components/schemas/TagResponse'
+    TagResponse:
+      allOf:
+        - $ref: '#/components/schemas/TagBase'
+        - type: object
+          properties:
+            tag_id: { type: string, format: uuid, readOnly: true }
+            created_at: { type: string, format: date-time, readOnly: true }
+            updated_at: { type: string, format: date-time, readOnly: true }
+    TimeEntryResponse:
+      allOf:
+        - $ref: '#/components/schemas/TimeEntryBase'
+        - type: object
+          properties:
+            time_entry_id: { type: string, format: uuid, readOnly: true }
+            user_id: { type: string, format: uuid, readOnly: true }
+            approved_at: { type: string, format: date-time, nullable: true, readOnly: true }
+            approver_id: { type: string, format: uuid, nullable: true, readOnly: true }
+            created_at: { type: string, format: date-time, readOnly: true }
+            updated_at: { type: string, format: date-time, readOnly: true }
+            # Vnořené objekty pro snazší zobrazení
+            user: { $ref: '#/components/schemas/UserSummary', readOnly: true } # Souhrn uživatele
+            task: { $ref: '#/components/schemas/TaskSummary', readOnly: true } # Souhrn úkolu
+            project: { $ref: '#/components/schemas/ProjectSummary', readOnly: true } # Souhrn projektu
+            approver: { $ref: '#/components/schemas/UserSummary', nullable: true, readOnly: true } # Souhrn schvalovatele
+
+    # --- Summary Schemas (for nesting) ---
+    UserSummary:
+      type: object
+      properties:
+        user_id: { type: string, format: uuid, readOnly: true }
+        username: { type: string, readOnly: true }
+        first_name: { type: string, readOnly: true }
+        last_name: { type: string, readOnly: true }
+        avatar_url: { type: string, format: url, nullable: true, readOnly: true }
+    ClientSummary:
+      type: object
+      properties:
+        client_id: { type: string, format: uuid, readOnly: true }
+        name: { type: string, readOnly: true }
+    ProjectSummary:
+      type: object
+      properties:
+        project_id: { type: string, format: uuid, readOnly: true }
+        name: { type: string, readOnly: true }
+        project_code: { type: string, nullable: true, readOnly: true }
+    TaskSummary:
+      type: object
+      properties:
+        task_id: { type: string, format: uuid, readOnly: true }
+        title: { type: string, readOnly: true }
+    TagSummary:
+      type: object
+      properties:
+        tag_id: { type: string, format: uuid, readOnly: true }
+        name: { type: string, readOnly: true }
+        color: { type: string, format: "^#[A-Fa-f0-9]{6}$", nullable: true, readOnly: true }
+
+    # --- Error Schemas ---
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, description: "Kód chyby pro strojové zpracování.", example: "RESOURCE_NOT_FOUND" }
+        message: { type: string, description: "Popis chyby čitelný pro člověka.", example: "Klient s daným ID nebyl nalezen." }
+        details: { type: object, additionalProperties: true, nullable: true, description: "Další detaily, např. pro validační chyby.", example: { "field": "email", "error": "Invalid format" } }
+    ValidationErrorResponse: # Specifická struktura pro 422
+      type: object
+      required: [code, message, errors]
+      properties:
+        code: { type: string, description: "Kód chyby.", example: "VALIDATION_ERROR" }
+        message: { type: string, description: "Obecná zpráva o validační chybě.", example: "Validation failed." }
+        errors:
+          type: array
+          description: "Seznam validačních chyb pro jednotlivá pole."
+          items:
+            type: object
+            properties:
+              field: { type: string, description: "Název pole, které selhalo validací.", example: "email" }
+              message: { type: string, description: "Chybová zpráva pro dané pole.", example: "Email must be a valid email address." }
+
+  parameters: # Opakovaně použitelné parametry
+    # --- ID Parameters ---
+    UserIdParam:
+      name: userId
+      in: path
+      required: true
+      description: ID uživatele.
+      schema: { type: string, format: uuid }
+    ClientIdParam:
+      name: clientId
+      in: path
+      required: true
+      description: ID klienta.
+      schema: { type: string, format: uuid }
+    ProjectIdParam:
+      name: projectId
+      in: path
+      required: true
+      description: ID projektu.
+      schema: { type: string, format: uuid }
+    TaskIdParam:
+      name: taskId
+      in: path
+      required: true
+      description: ID úkolu.
+      schema: { type: string, format: uuid }
+    TagIdParam:
+      name: tagId
+      in: path
+      required: true
+      description: ID štítku.
+      schema: { type: string, format: uuid }
+    TimeEntryIdParam:
+      name: timeEntryId
+      in: path
+      required: true
+      description: ID časového záznamu.
+      schema: { type: string, format: uuid }
+
+    # --- Pagination Parameters ---
+    LimitParam:
+      name: limit
+      in: query
+      description: Maximální počet záznamů k vrácení.
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    OffsetParam:
+      name: offset
+      in: query
+      description: Počet záznamů k přeskočení.
+      schema: { type: integer, minimum: 0, default: 0 }
+
+    # --- Sorting Parameters ---
+    SortByParam:
+      name: sortBy
+      in: query
+      description: Název pole pro řazení (např. 'name', 'created_at'). Výchozí hodnota závisí na endpointu.
+      schema: { type: string }
+    SortOrderParam:
+      name: sortOrder
+      in: query
+      description: Směr řazení.
+      schema: { type: string, enum: [asc, desc], default: asc }
+
+    # --- Filtering Parameters ---
+    ClientIdFilterParam:
+      name: clientId
+      in: query
+      description: Filtrování podle ID klienta.
+      schema: { type: string, format: uuid }
+    ProjectIdFilterParam:
+      name: projectId
+      in: query
+      description: Filtrování podle ID projektu.
+      schema: { type: string, format: uuid }
+    TaskIdFilterParam:
+      name: taskId
+      in: query
+      description: Filtrování podle ID úkolu.
+      schema: { type: string, format: uuid }
+    UserIdFilterParam:
+      name: userId
+      in: query
+      description: Filtrování podle ID uživatele (pro admin/manager pohledy).
+      schema: { type: string, format: uuid }
+    AssigneeIdFilterParam:
+      name: assigneeId
+      in: query
+      description: Filtrování podle ID přiřazeného uživatele.
+      schema: { type: string, format: uuid }
+    CreatorIdFilterParam:
+      name: creatorId
+      in: query
+      description: Filtrování podle ID tvůrce.
+      schema: { type: string, format: uuid }
+
+  responses: # Opakovaně použitelné odpovědi
+    BadRequest:
+      description: Nevalidní požadavek (např. chybějící parametr, špatný formát).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: "BAD_REQUEST"
+            message: "Missing required query parameter 'limit'."
+    Unauthorized:
+      description: Neautorizovaný přístup (chybějící, neplatný nebo expirovaný token).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: "UNAUTHENTICATED"
+            message: "Authentication token is missing or invalid."
+    Forbidden:
+      description: Nedostatečná oprávnění pro provedení operace.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: "FORBIDDEN"
+            message: "User does not have permission to delete this resource."
+    NotFound:
+      description: Požadovaný zdroj nebyl nalezen.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: "NOT_FOUND"
+            message: "Project with the specified ID was not found."
+    Conflict:
+      description: Konflikt (např. pokus o vytvoření zdroje, který již existuje s unikátním klíčem).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: "CONFLICT"
+            message: "A client with this name already exists."
+    UnprocessableEntity:
+      description: Sémanticky nevalidní data (např. validační chyby polí).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorResponse' # Používá specifické schéma
+          example:
+            code: "VALIDATION_ERROR"
+            message: "Validation failed."
+            errors:
+              - field: "email"
+                message: "Email must be a valid email address."
+              - field: "password"
+                message: "Password must be at least 8 characters long."
+    InternalServerError:
+      description: Neočekávaná chyba serveru.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: "INTERNAL_SERVER_ERROR"
+            message: "An unexpected error occurred on the server."
+
+  securitySchemes:
+    bearerAuth: # Název schématu, na který se odkazujeme v 'security'
+      type: http
+      scheme: bearer
+      bearerFormat: JWT # Informace o formátu tokenu
+      description: "Pro přístup k chráněným endpointům vložte JWT Access token do 'Authorization' hlavičky: `Authorization: Bearer {token}`"
+
+# Globální nastavení bezpečnosti - všechny endpointy vyžadují bearerAuth, pokud není uvedeno jinak
+# Může být přepsáno na úrovni jednotlivých operací (např. pro /auth/login, /auth/register)
+# security:
+#   - bearerAuth: []
