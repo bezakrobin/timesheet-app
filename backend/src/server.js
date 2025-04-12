@@ -3,10 +3,6 @@
 const app = require('./app');
 const config = require('./config');
 require('./models');
-// const { testDbConnection } = require("./db");
-
-// --- Test DB Connection ---
-// void testDbConnection();
 
 // --- Import Handler Factories ---
 const createUnhandledRejectionHandler = require('./handlers/unhandledRejection.handler');
