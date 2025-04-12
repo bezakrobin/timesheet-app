@@ -41,13 +41,19 @@ try {
 console.log('🔧 Setting up model associations');
 try {
     const defineUserAssociations = require('../associations/user.association');
+    const defineClientAssociations = require('../associations/client.association');
 
-    if (db.User) defineUserAssociations(db);
+    if (Object.prototype.hasOwnProperty.call(db, 'User')) {
+        defineUserAssociations(db);
+    }
+    if (Object.prototype.hasOwnProperty.call(db, 'Client')) {
+        defineClientAssociations(db);
+    }
 
     console.log('✅  Associations configured successfully.');
 
 } catch (error) {
-    console.error('❌ Error loading or running association files:', error);
+    console.error('❌  Error loading or running association files:', error);
     console.warn('🔧 Associations might not be fully set up.');
     process.exit(1)
 }

@@ -18,7 +18,7 @@ console.log(`🔗 Connecting to database: ${config.DB_NAME} on host: ${config.DB
 
 const sequelize = new Sequelize(config.DB_NAME, config.DB_USER, config.DB_PASSWORD, options);
 
-// --- Test Connection ---
+// --- Test DB Connection ---
 const testDbConnection = async () => {
     try {
         await sequelize.authenticate();
@@ -29,6 +29,4 @@ const testDbConnection = async () => {
     }
 };
 
-void testDbConnection();
-
-module.exports = sequelize;
+module.exports = { sequelize, testDbConnection };

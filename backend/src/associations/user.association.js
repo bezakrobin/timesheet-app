@@ -1,7 +1,7 @@
 'use strict';
 
-module.exports = (models) => {
-    const { User, Task, Project, ProjectMembership, TimeEntry } = models;
+module.exports = (db) => {
+    const { User, Task, Project, ProjectMembership, TimeEntry } = db;
 
     User.belongsTo(User, {
         as: 'Manager',
