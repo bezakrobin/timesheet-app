@@ -16,6 +16,6 @@ module.exports = (server) => {
             console.log(' Process exiting due to uncaught exception.');
             process.exit(1);
         });
-        setTimeout(() => process.exit(1), 5000).unref();
+        setTimeout(() => process.exit(1), 5000);
     };
 };

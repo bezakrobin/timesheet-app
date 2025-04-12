@@ -19,6 +19,6 @@ module.exports = (server) => {
             console.log(' Process exiting due to unhandled rejection.');
             process.exit(1);
         });
-        setTimeout(() => process.exit(1), 7000).unref();
+        setTimeout(() => process.exit(1), 7000);
     };
 };
