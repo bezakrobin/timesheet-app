@@ -40,14 +40,38 @@ try {
 // --- 4. Set Up Associations ---
 console.log('🔧 Setting up model associations');
 try {
-    const defineUserAssociations = require('../associations/user.association');
     const defineClientAssociations = require('../associations/client.association');
+    const defineProjectAssociations = require('../associations/project.association');
+    const defineProjectMembershipAssociations = require('../associations/projectMembership.association');
+    const defineTagAssociations = require('../associations/tag.association');
+    const defineTaskAssociations = require('../associations/task.association');
+    const defineTaskTagAssociations = require('../associations/taskTag.association');
+    const defineTimeEntryAssociations = require('../associations/timeEntry.association');
+    const defineUserAssociations = require('../associations/user.association');
 
-    if (Object.prototype.hasOwnProperty.call(db, 'User')) {
-        defineUserAssociations(db);
-    }
     if (Object.prototype.hasOwnProperty.call(db, 'Client')) {
         defineClientAssociations(db);
+    }
+    if (Object.prototype.hasOwnProperty.call(db, 'Project')) {
+        defineProjectAssociations(db);
+    }
+    if (Object.prototype.hasOwnProperty.call(db, 'ProjectMembership')) {
+        defineProjectMembershipAssociations(db);
+    }
+    if (Object.prototype.hasOwnProperty.call(db, 'Tag')) {
+        defineTagAssociations(db);
+    }
+    if (Object.prototype.hasOwnProperty.call(db, 'Task')) {
+        defineTaskAssociations(db);
+    }
+    if (Object.prototype.hasOwnProperty.call(db, 'TaskTag')) {
+        defineTaskTagAssociations(db);
+    }
+    if (Object.prototype.hasOwnProperty.call(db, 'TimeEntry')) {
+        defineTimeEntryAssociations(db);
+    }
+    if (Object.prototype.hasOwnProperty.call(db, 'User')) {
+        defineUserAssociations(db);
     }
 
     console.log('✅  Associations configured successfully.');
