@@ -1,6 +1,6 @@
 'use strict';
 
-const { Model, DataTypes, UUIDV4} = require('sequelize');
+const { Model, DataTypes, UUIDV4, Sequelize } = require('sequelize');
 const { PROJECT_ROLE_VALUES } = require('../enums');
 
 module.exports = (sequelize) => {

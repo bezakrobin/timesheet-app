@@ -2,7 +2,7 @@
 
 const app = require('./app');
 const config = require('./config');
-// const db = require('./models');
+require('./models');
 // const { testDbConnection } = require("./db");
 
 // --- Test DB Connection ---
