@@ -2,8 +2,8 @@ const express = require('express');
 const config = require('./config');
 const cors = require('cors');
 
-// Import routerů (až budou existovat)
-// const apiRoutes = require('./routes');
+// Import routerů
+const apiRoutes = require('./routes');
 
 // Import middleware (až budou existovat)
 // const errorHandler = require('./middleware/errorHandler.middleware');
@@ -26,7 +26,7 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-// Jednoduchý middleware pro logování requestů (pro ukázku)
+// Jednoduchý middleware pro logování requestů
 app.use((req, res, next) => {
     console.log(`${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
     next();
