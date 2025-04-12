@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: /backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: timesheet_backend
+    ports:
+      - "3000:3000"
+    volumes:
+      # Připojí aktuální adresář (kromě node_modules) do /app v kontejneru
+      # Umožňuje live reload změn kódu bez nutnosti rebuild image (díky nodemon)
+      - .:/app
+      - /app/node_modules # Zamezí přepsání node_modules z hostitele (důležité!)
+    env_file:
+      - /backend/.env
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-timesheet_db}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - timesheet_network
+
+  db:
+    image: postgres:15-alpine
+    container_name: timesheet_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-timesheet_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user} -d ${POSTGRES_DB:-timesheet_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - timesheet_network
+
+# Definice pojmenovaných volumes
+volumes:
+  postgres_data:
+    driver: local
+
+# Definice sítí
+networks:
+  timesheet_network:
+    driver: bridge
+

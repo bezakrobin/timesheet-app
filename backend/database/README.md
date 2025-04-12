@@ -1,0 +1,1 @@
+Info k databázi a migracím
