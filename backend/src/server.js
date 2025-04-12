@@ -11,7 +11,7 @@ const createUncaughtExceptionHandler = require('./handlers/uncaughtException.han
 const createSigintHandler = require('./handlers/sigint.handler');
 
 // --- Start the Server ---
-console.log(`🔧 Attempting to start server on port ${config.PORT}...`);
+console.log(`ℹ️ Attempting to start server on port ${config.PORT}...`);
 const server = app.listen(config.PORT, () => {
     console.log(`✅  Server is listening on port ${config.PORT}...`);
     console.log(`💻 Environment: ${config.NODE_ENV}`);
