@@ -26,7 +26,7 @@ console.log(`🔗 Connecting to database: ${config.DB_NAME} on host: ${config.DB
 let sequelizeInstance = null;
 try {
     sequelizeInstance = new Sequelize(config.DB_NAME, config.DB_USER, config.DB_PASSWORD, options);
-    console.log('✅  Sequelize instance created successfully.');
+    console.log('✅ Sequelize instance created successfully.');
 } catch (error) {
     console.error('❌ Error creating Sequelize instance:', error);
     process.exit(1);
@@ -41,7 +41,7 @@ const testDbConnection = async (instance) => {
     }
     try {
         await instance.authenticate();
-        console.log('✅  Database connection has been established successfully.');
+        console.log('✅ Database connection has been established successfully.');
     } catch (error) {
         console.error('❌ Unable to connect to the database:', error);
         process.exit(1);

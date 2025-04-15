@@ -30,7 +30,7 @@ try {
             const modelDefinition = require(path.join(__dirname, file));
             const model = modelDefinition(sequelize, Sequelize.DataTypes);
             db[model.name] = model;
-            console.log(`✅  Loaded model: ${model.name} from ${file}`);
+            console.log(`✅ Loaded model: ${model.name} from ${file}`);
         });
 } catch (error) {
     console.error('❌ Error loading model definition files:', error);
@@ -74,7 +74,7 @@ try {
         defineUserAssociations(db);
     }
 
-    console.log('✅  Associations configured successfully.');
+    console.log('✅ Associations configured successfully.');
 
 } catch (error) {
     console.error('❌  Error loading or running association files:', error);
@@ -86,5 +86,5 @@ try {
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 
-console.log('✅  models/index.js finished loading');
+console.log('✅ models/index.js finished loading');
 module.exports = db;
